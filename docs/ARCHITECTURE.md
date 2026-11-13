@@ -160,7 +160,7 @@ export class MathEngine {
   reset()                                 // wipes mastery (Foreman's Log "reset")
 }
 ```
-Tests: `tests/mastery.test.mjs` runnable with `node --test tests/` (Node 18, no deps).
+Tests: `tests/mastery.test.mjs` runnable with `node --test tests/*.test.mjs` (Node 18, no deps).
 
 ## Module: PWA shell (owner: Systems)
 - `manifest.json` (name, short_name "Robo-Factor", display "fullscreen", orientation "landscape",

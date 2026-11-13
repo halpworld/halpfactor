@@ -71,7 +71,7 @@ python3 -m http.server 8173
 Then open <http://localhost:8173>. Run the tests with Node 18+:
 
 ```bash
-node --test tests/
+node --test tests/*.test.mjs
 ```
 
 `dev/` contains standalone harnesses for the engine, UI and shop that are handy while developing;
@@ -102,7 +102,7 @@ docs/         architecture and shop design
 
 Issues and pull requests are welcome. Please keep the ground rules from
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): no dependencies or build step, no text inputs (the
-iPad keyboard must never appear), and `node --test tests/` must pass.
+iPad keyboard must never appear), and `node --test tests/*.test.mjs` must pass.
 
 ## License
 
