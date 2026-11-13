@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI harness</title>
+<link rel="stylesheet" href="../css/ui.css"><link rel="stylesheet" href="../css/shop.css">
+<style>
+  html,body{margin:0;height:100%;background:#060a18;overflow:hidden;font-family:system-ui}
+  #ui{position:fixed;inset:0;pointer-events:none}
+  #panel{position:fixed;left:8px;bottom:8px;right:8px;z-index:999;display:flex;flex-wrap:wrap;gap:6px;pointer-events:auto;background:rgba(0,0,0,.6);padding:6px;border-radius:8px}
+  #panel button{font:12px system-ui;padding:6px 8px}
+  #log{position:fixed;left:8px;top:100px;z-index:999;color:#9f9;font:12px monospace;max-width:300px;pointer-events:none;white-space:pre-wrap}
+  #anchor{position:fixed;width:14px;height:14px;margin:-7px;border-radius:50%;background:magenta;left:420px;top:380px;pointer-events:none}
+</style></head>
+<body>
+<div id="ui"></div><div id="anchor"></div><div id="log"></div><div id="panel"></div>
+<script type="module">
+import { UI } from '../src/ui/ui.js';
+import { Emitter } from '../src/core/events.js';
+const bus = new Emitter();
+const synth = new Proxy({}, { get: () => () => {} });
+const ui = new UI(document.getElementById('ui'), { synth, bus });
+window.ui = ui; window.bus = bus;
+const logEl = document.getElementById('log');
+const log = (m) => { logEl.textContent = (m + '\n' + logEl.textContent).slice(0, 600); };
+for (const t of ['ui:openShop','ui:foremanRequest','ui:toggleSfx','ui:toggleAmbient','ui:surgeWrong','ui:calibrationWrong'])
+  bus.on(t, (p) => { log(t + ' ' + JSON.stringify(p || {})); if (t==='ui:toggleSfx'){hud.sfxOn=!hud.sfxOn;ui.setHud(hud);} if(t==='ui:toggleAmbient'){hud.ambientOn=!hud.ambientOn;ui.setHud(hud);} if(t==='ui:foremanRequest') openLog(); if(t==='ui:openShop') openShop(); });
+
+const hud = { boltsText: '120', rebirths: 2, dailyReady: true, goal: { label: 'Crane', cost: 1500, progress: 0.4, tab: 'build' }, bolts: 120, level: 3, ordersCompleted: 7, overclock: false, overclockRemainingMs: 0, sfxOn: true, ambientOn: true };
+ui.setHud(hud);
+const anchor = () => { const r = document.getElementById('anchor').getBoundingClientRect(); return { x: r.left + 7, y: r.top + 7 }; };
+
+let shopItems = [
+  { id:'goldBelts', name:'Golden Belts', desc:'Shiny gold conveyor stripes', cost:150, kind:'cosmetic', owned:false, equipped:false, locked:false },
+  { id:'rainbowTrails', name:'Rainbow Trails', desc:'Belts leave a rainbow', cost:250, kind:'cosmetic', owned:true, equipped:false, locked:false },
+  { id:'cyberCat', name:'Cyber-Cat', desc:'A robo-kitty friend', cost:400, kind:'cosmetic', owned:true, equipped:true, locked:false },
+  { id:'drone-7', name:'Auto-Drone x7', desc:'Solves the 7s for you', cost:120, kind:'drone', owned:false, equipped:false, locked:true, lockReason:'Master the 7s to unlock' },
+  { id:'drone-2', name:'Auto-Drone x2', desc:'Solves the 2s for you', cost:120, kind:'drone', owned:false, equipped:false, locked:false },
+  { id:'drone-5', name:'Auto-Drone x5', desc:'Solves the 5s for you', cost:120, kind:'drone', owned:true, equipped:false, locked:false },
+];
+function shopView() { return { bolts: hud.bolts, rebirths: 0, mult: 1, upgrades: [], build: { items: [], done: 0, total: 0 }, pets: { eggs: [], inventory: [], goldenReady: [], index: [], slots: 3, equippedCount: 0, invCount: 0, invMax: 60 }, style: [], drones: shopItems, rebirth: { can: false, rebirths: 0, nextMult: 1.5, nextSlots: 4, buildsDone: 0, buildsTotal: 0, keeps: [], resets: [] }, tab: 'drones' }; }
+function openShop() {
+  ui.openShop(shopView(), (a) => {
+    log('shop ' + JSON.stringify(a));
+    const it = shopItems.find(i => i.id === a.id);
+    if (a.action === 'buy') { hud.bolts -= it.cost; it.owned = true; ui.setHud(hud); }
+    if (a.action === 'equip') it.equipped = true;
+    if (a.action === 'unequip') it.equipped = false;
+    ui.refreshShop(shopView());
+    return { ok: true };
+  });
+}
+function openLog() {
+  const facts = {}; const now = Date.now();
+  for (let a = 1; a <= 12; a++) for (let b = 1; b <= 12; b++) {
+    const seen = (a * 7 + b * 3) % 5 !== 0 && (a <= 7 || b <= 3);
+    if (!seen) continue;
+    const m = ((a * 31 + b * 17) % 100) / 100;
+    facts[a + 'x' + b] = { attempts: 3 + (a + b) % 9, correct: 3 + (a + b) % 7, avgResponseTimeMs: 1200 + m * 5000, masteryScore: m > .6 ? .97 : m, lastSeen: now - m * 8 * 86400000, recentErrors: 0 };
+    if (m > .6) facts[a + 'x' + b].avgResponseTimeMs = 1800;
+  }
+  const tm = [0]; for (let t = 1; t <= 12; t++) tm.push(((t * 37) % 100) / 100);
+  ui.openForemanLog({ facts, tableMastery: tm, settings: { autoCurriculum: true, enabledTables: [1, 2, 5, 10], sfx: true, ambient: true } },
+    { onSettingsChange: (s) => log('settings ' + JSON.stringify(s)), onReset: () => log('RESET') });
+}
+const B = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.addEventListener('click', fn); document.getElementById('panel').appendChild(b); };
+const show = (p) => p.then((r) => log(JSON.stringify(r)));
+B('Calib 7x8 anchor', () => show(ui.promptCalibration({ a: 7, b: 8, anchor: anchor() })));
+B('Calib 2x5 centred', () => show(ui.promptCalibration({ a: 2, b: 5, anchor: null })));
+B('Calib 12x12', () => show(ui.promptCalibration({ a: 12, b: 12, anchor: anchor() })));
+B('Calib 12x1', () => show(ui.promptCalibration({ a: 12, b: 1, anchor: null })));
+B('Calib auto 6x7', () => show(ui.promptCalibration({ a: 6, b: 7, anchor: anchor(), autoSolve: true })));
+B('Surge 9x6', () => show(ui.promptSurge({ a: 9, b: 6, anchor: anchor() })));
+B('Surge 12x12', () => show(ui.promptSurge({ a: 12, b: 12 })));
+B('Toast info', () => ui.showToast('7 × 6 makes 42 — the boss needs 56!'));
+B('Toast good', () => ui.showToast('Nice!', { kind: 'good' }));
+B('Toast warn', () => ui.showToast('Careful', { kind: 'warn' }));
+B('Level up', () => ui.showLevelUp(4, [3, 4]));
+B('Tut target', () => ui.showTutorial({ text: 'Tap the 2 crate', target: { x: 80, y: 300, w: 110, h: 90 }, step: 2, total: 5 }));
+B('Tut right', () => ui.showTutorial({ text: 'Now tap the ×5 forge', target: { x: innerWidth - 300, y: 380, w: 200, h: 140 }, step: 3, total: 5 }));
+B('Tut none', () => ui.showTutorial({ text: 'This boss needs 10 parts!', target: null, step: 1, total: 5 }));
+B('Hide tut', () => ui.hideTutorial());
+B('Shop', openShop);
+B('Foreman log', openLog);
+B('Overclock on', () => { hud.overclock = true; let r = 12000; const id = setInterval(() => { r -= 100; hud.overclockRemainingMs = r; if (r <= 0) { hud.overclock = false; clearInterval(id); } ui.setHud(hud); }, 100); });
+B('+50 bolts', () => { hud.bolts += 50; ui.setHud(hud); bus.emit('game:bolts', { bolts: hud.bolts, delta: 50, x: 500, y: 500 }); });
+B('Order+1', () => { hud.ordersCompleted++; ui.setHud(hud); });
+B('isBlocking?', () => log('blocking=' + ui.isBlocking()));
+</script></body></html>
