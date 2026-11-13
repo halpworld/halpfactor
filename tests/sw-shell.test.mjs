@@ -33,7 +33,7 @@ test('sw.js SHELL lists exactly the shipped files', () => {
 
 test('sw.js cache version bumped and keys normalised', () => {
   const src = readFileSync(join(ROOT, 'sw.js'), 'utf8');
-  assert.match(src, /const CACHE_VERSION = 'v4'/);
+  assert.match(src, /const CACHE_VERSION = 'v5'/);
   assert.ok(!shellFromSw().includes('./'), "navigations are stored under 'index.html', not './'");
   assert.match(src, /redirected/);
 });

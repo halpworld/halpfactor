@@ -9,7 +9,7 @@ export function makeEngine(log) {
     return Math.random() < 0.5 ? { a, b } : { a: b, b: a };
   };
   const engine = {
-    forced: null, // harness can set { a, b, isPractice }
+    forced: null, // harness can set { a, b, isPractice, mastered }
     record(a, b, correct, ms) {
       const k = `${Math.min(a, b)}x${Math.max(a, b)}`;
       const f = (facts[k] = facts[k] || { attempts: 0, correct: 0, mastery: 0 });
@@ -23,7 +23,7 @@ export function makeEngine(log) {
     async nextOrder(level, settings) {
       const f = engine.forced || { ...pick(settings), isPractice: Math.random() < 0.2 };
       engine.forced = null;
-      return { a: f.a, b: f.b, target: f.a * f.b, isPractice: !!f.isPractice };
+      return { a: f.a, b: f.b, target: f.a * f.b, isPractice: !!f.isPractice, mastered: !!f.mastered };
     },
     async nextSurge(level, settings) {
       return pick(settings);

@@ -128,6 +128,7 @@ export function makeUI(host, bus, log) {
       ui.foreman = { data, handlers };
     },
     isBlocking() { return blocking; },
+    isCovered() { return false; },
     isPromptOpen() { return !!ui.pending; },
   };
   return ui;

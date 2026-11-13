@@ -33,6 +33,8 @@
 //   recentKeys: weight * 0.05 (strongly avoided, but never impossible)
 //   surge option (timed popups): weakness bonuses are halved so surges stay fair.
 // isPractice = the chosen pair is weak (avg > 4000 ms, or recentErrors > 0).
+// mastered   = the chosen pair is mastered in at least one order (masteredStats) and not weak
+//              (always false when isPractice is true).
 //
 // Gentleness: when few tables are active (<= 4, none of them 11/12) the "other" factor b is
 // kept in 1..10 (the 11 and 12 columns appear later via the unlocked tables / swapped order).
@@ -307,5 +309,9 @@ export function pickFact(tracker, tables, { rng = Math.random, now = Date.now(),
   const keepOrder = rng() < p1;
   const a = keepOrder ? chosen.t : chosen.b;
   const b = keepOrder ? chosen.b : chosen.t;
-  return { a, b, isPractice: chosen.weak };
+  // mastered: the chosen fact is mastered in at least one order AND neither order is weak (slow
+  // or with recent errors), so the game may pose it as an inverse "factor" order instead of a
+  // forward "build" order. A weak pair is always practised forwards.
+  const mastered = !chosen.weak && (masteredStats(tracker.get(chosen.t, chosen.b)) || masteredStats(tracker.get(chosen.b, chosen.t)));
+  return { a, b, isPractice: chosen.weak, mastered };
 }

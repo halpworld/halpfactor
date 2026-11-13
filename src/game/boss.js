@@ -180,11 +180,16 @@ function renderHead(look) {
   return { canvas, x: HEAD.x - pad, y: HEAD.y - pad, w: HEAD.w + pad * 2, h: HEAD.h + pad * 2 };
 }
 
-function wrapBubbleText(target, part) {
+/**
+ * Bubble text. Factor orders: "NEED" + the product. Build orders: "BUILD" + "a × b" — the
+ * product is never shown before the child answers the Calibration Lock.
+ */
+export function bubbleText(target, part, build) {
+  if (build) return { line1: 'BUILD', num: `${build.a} × ${build.b}`, line2: part.name };
   return { line1: 'NEED', num: String(target), line2: part.name };
 }
 
-function renderBubble(target, partIndex, itemSprites, practice, name) {
+function renderBubble(target, partIndex, itemSprites, practice, name, build) {
   const part = PART_TYPES[partIndex];
   const W = 330;
   const H = 168;
@@ -210,23 +215,34 @@ function renderBubble(target, partIndex, itemSprites, practice, name) {
   ctx.lineTo(W / 2, H + 22);
   ctx.lineTo(W / 2 + 18, H - 4);
   ctx.stroke();
-  const t = wrapBubbleText(target, part);
+  const t = bubbleText(target, part, build);
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'center';
   ctx.font = `700 17px ${FONT.display}`;
   ctx.fillStyle = COLORS.textDim;
   ctx.fillText(name.toUpperCase(), W / 2, 24);
-  // NEED + big number + icon
-  ctx.font = `900 82px ${FONT.display}`;
-  const numW = ctx.measureText(t.num).width;
-  const groupW = 62 + 10 + numW + 12 + 56;
+  // Label + big number (+ part icon for NEED orders; build orders move the icon next to the
+  // part name so "12 × 12" gets the whole row).
+  ctx.font = `800 22px ${FONT.display}`;
+  const labelW = ctx.measureText(t.line1).width;
+  const iconW = build ? 0 : 12 + 56;
+  const avail = W - 28 - (labelW + 12) - iconW;
+  let size = 82;
+  ctx.font = `900 ${size}px ${FONT.display}`;
+  let numW = ctx.measureText(t.num).width;
+  if (numW > avail) {
+    size = Math.max(40, Math.floor((size * avail) / numW));
+    ctx.font = `900 ${size}px ${FONT.display}`;
+    numW = ctx.measureText(t.num).width;
+  }
+  const groupW = labelW + 12 + numW + iconW;
   let x = W / 2 - groupW / 2;
   ctx.textAlign = 'left';
   ctx.font = `800 22px ${FONT.display}`;
   ctx.fillStyle = COLORS.text;
   ctx.fillText(t.line1, x, 84);
-  x += 72;
-  ctx.font = `900 82px ${FONT.display}`;
+  x += labelW + 12;
+  ctx.font = `900 ${size}px ${FONT.display}`;
   ctx.shadowColor = practice ? COLORS.gold : COLORS.cyan;
   ctx.shadowBlur = 16;
   ctx.fillStyle = '#ffffff';
@@ -234,11 +250,19 @@ function renderBubble(target, partIndex, itemSprites, practice, name) {
   ctx.shadowBlur = 0;
   ctx.fillText(t.num, x, 86);
   x += numW + 12;
-  ctx.drawImage(itemSprites.parts[partIndex], x, 86 - 28, 56, 56);
-  ctx.textAlign = 'center';
+  if (!build) ctx.drawImage(itemSprites.parts[partIndex], x, 86 - 28, 56, 56);
   ctx.font = `800 24px ${FONT.display}`;
   ctx.fillStyle = part.color;
-  ctx.fillText(t.line2, W / 2, 140);
+  if (build) {
+    const pw = ctx.measureText(t.line2).width;
+    const gx = W / 2 - (40 + 8 + pw) / 2;
+    ctx.drawImage(itemSprites.parts[partIndex], gx, 140 - 20, 40, 40);
+    ctx.textAlign = 'left';
+    ctx.fillText(t.line2, gx + 48, 140);
+  } else {
+    ctx.textAlign = 'center';
+    ctx.fillText(t.line2, W / 2, 140);
+  }
   return { canvas, w: W, h: H + 26 };
 }
 
@@ -266,7 +290,8 @@ function renderPracticeTag(bonus) {
 
 export class Boss {
   /**
-   * @param {object} o { seed, target, partIndex, practice, bonus, sprites, items, name? }
+   * @param {object} o { seed, target, partIndex, practice, bonus, sprites, items, name?, kind?, a?, b? }
+   *   kind 'build' (with a, b): the bubble shows "BUILD a × b" instead of the product.
    */
   constructor(o) {
     const rng = mulberry32(o.seed * 7919 + 13);
@@ -292,7 +317,9 @@ export class Boss {
     this.eyePal = [PAL.cyan, PAL.magenta, PAL.green, PAL.gold, PAL.purple][(rng() * 5) | 0];
     this.torso = renderTorso(this.look);
     this.head = renderHead(this.look);
-    this.bubble = renderBubble(o.target, o.partIndex, o.items, this.practice, this.name);
+    this.kind = o.kind === 'build' ? 'build' : 'factor';
+    const build = this.kind === 'build' ? { a: o.a, b: o.b } : null;
+    this.bubble = renderBubble(o.target, o.partIndex, o.items, this.practice, this.name, build);
     this.tag = this.practice ? renderPracticeTag(o.bonus || 5) : null;
 
     this.x = DOCK.x1 + 260;

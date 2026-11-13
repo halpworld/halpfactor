@@ -327,3 +327,45 @@ test('small table override keeps x11/x12 closed until basics are mastered', () =
     assert.ok(f.a <= 10 && f.b <= 10, `${f.a}x${f.b} asked before basics mastered`);
   }
 });
+
+test('pickFact reports whether the chosen fact is mastered (either order)', () => {
+  const t = new MasteryTracker();
+  const rng = rng32(9);
+  for (let i = 0; i < 50; i++) assert.equal(pickFact(t, [3], { rng, now: NOW }).mastered, false);
+  // master 3x4 only in one order; the pair counts as mastered either way round
+  for (let i = 0; i < 5; i++) t.record(3, 4, { correct: true, responseTimeMs: 1200, now: NOW });
+  let seen = 0;
+  for (let i = 0; i < 2000; i++) {
+    const f = pickFact(t, [3], { rng, now: NOW });
+    assert.equal(typeof f.mastered, 'boolean');
+    const is34 = (f.a === 3 && f.b === 4) || (f.a === 4 && f.b === 3);
+    assert.equal(f.mastered, is34);
+    if (is34) seen++;
+  }
+  assert.ok(seen > 0);
+});
+
+test('pickFact: a weak pair is never reported as mastered (reviewer case: 4x3 miss after 3s mastered)', () => {
+  const t = new MasteryTracker();
+  const rng = rng32(21);
+  for (let b = 1; b <= 10; b++) for (let i = 0; i < 6; i++) rec(t, 3, b, true, 1000);
+  let m34 = 0;
+  for (let i = 0; i < 3000; i++) {
+    const f = pickFact(t, [3], { rng, now: NOW });
+    if (f.mastered) assert.equal(f.isPractice, false);
+    if ((f.a === 3 && f.b === 4) || (f.a === 4 && f.b === 3)) m34 += f.mastered ? 1 : 0;
+  }
+  assert.ok(m34 > 0); // mastered 3x4 can be posed as a factor order
+  rec(t, 4, 3, false, 3000); // one miss on the other order
+  let seen = 0;
+  for (let i = 0; i < 3000; i++) {
+    const f = pickFact(t, [3], { rng, now: NOW });
+    if (f.mastered) assert.equal(f.isPractice, false);
+    if ((f.a === 3 && f.b === 4) || (f.a === 4 && f.b === 3)) {
+      seen++;
+      assert.equal(f.mastered, false);
+      assert.equal(f.isPractice, true);
+    }
+  }
+  assert.ok(seen > 0);
+});

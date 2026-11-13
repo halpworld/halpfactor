@@ -408,6 +408,14 @@ export class Forge {
       ctx.lineWidth = 3;
       roundRectPath(ctx, -FW / 2 - 5, -FH - 5, FW + 10, FH + 10, 20);
       ctx.stroke();
+    } else if (this.hint > 0) {
+      // Hinted target (tutorial / build order): pulsing gold outline, visible over the sprite.
+      ctx.globalAlpha = 0.55 + 0.45 * Math.sin(time * 7);
+      ctx.strokeStyle = COLORS.gold;
+      ctx.lineWidth = 4;
+      roundRectPath(ctx, -FW / 2 - 5, -FH - 5, FW + 10, FH + 10, 20);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
     }
     // Window core glow (status colour)
     const wy = this.baseY + WIN_Y * sy;

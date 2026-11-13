@@ -23,7 +23,7 @@
 
 ## About
 
-Boss robots roll up to your loading dock with orders like *"Captain Sprocket needs 56 Plasma
+Boss robots roll up to your loading dock with orders like *"Captain Sprocket: BUILD 7 × 8 Plasma
 Cores"*. You wire a raw-material dispenser (1–12) into a multiplier forge (×1–×12) whose product
 matches the order. Get it right and the factory roars to life, the boss pays out in bolts, and you
 spend them in a tycoon-style shop.
@@ -37,11 +37,14 @@ offline once installed to the Home Screen.
 
 ## How to play
 
-1. Read the boss's order (the number on the dock).
-2. Tap a dispenser on the left, then a forge in the middle — any pair that multiplies to the
-   target works (24 = 3×8 = 4×6 = 2×12).
-3. Confirm, and watch the goods flow to the boss.
-4. Answer correctly in a row to build a **combo**; fast first-try answers can be **CRITICAL**.
+Bosses place two kinds of order:
+
+- **BUILD a × b** — wire dispenser *a* into forge ×*b* (the matching parts glow), then punch the
+  product into the Calibration Lock. The answer is never shown, so the child has to recall it.
+- **NEED 56** — once a fact is mastered, bosses sometimes ask for just the product. Find a
+  dispenser and forge that make it (56 = 7×8); the wiring itself is the answer.
+
+Answer correctly in a row to build a **combo**; fast first-try answers can be **CRITICAL**.
 
 ## The shop
 

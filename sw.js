@@ -13,7 +13,7 @@
 // - activate: delete old caches
 // tests/sw-shell.test.mjs checks that SHELL lists every shipped file.
 
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `robofactor-${CACHE_VERSION}`;
 
 const SHELL = [

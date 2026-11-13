@@ -4,7 +4,7 @@
 //     | {type:'next', id, kind:'order'|'surge', tables, recentKeys} | {type:'snapshot', id} | {type:'reset'}
 // Out: {type:'ready'}                         (after init; used for the engine's handshake)
 //      {type:'state', data, tableMastery}     (after every record/reset; main persists `data`)
-//      {type:'next', id, a, b, isPractice}
+//      {type:'next', id, a, b, isPractice, mastered}
 //      {type:'snapshot', id, facts, tableMastery}
 //
 // The message handler is exported as createHandler() so the engine can run the very same code
@@ -40,7 +40,7 @@ export function createHandler(post) {
             recentKeys: msg.recentKeys,
             surge: msg.kind === 'surge',
           });
-          post({ type: 'next', id: msg.id, a: pick.a, b: pick.b, isPractice: pick.isPractice });
+          post({ type: 'next', id: msg.id, a: pick.a, b: pick.b, isPractice: pick.isPractice, mastered: !!pick.mastered });
           break;
         }
         case 'snapshot': {

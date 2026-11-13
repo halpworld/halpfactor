@@ -175,7 +175,7 @@ export class MathEngine {
         this._schedulePersist();
         break;
       case 'next':
-        this._settle(m.id, { a: m.a, b: m.b, isPractice: !!m.isPractice });
+        this._settle(m.id, { a: m.a, b: m.b, isPractice: !!m.isPractice, mastered: !!m.mastered });
         break;
       case 'snapshot':
         if (Array.isArray(m.tableMastery)) this._cache = m.tableMastery;
@@ -260,7 +260,7 @@ export class MathEngine {
     if (!Array.isArray(tables) || tables.length === 0) tables = DEFAULT_TABLES.slice();
     const fallback = () => {
       const a = tables[Math.floor(Math.random() * tables.length)] || DEFAULT_TABLES[0];
-      return { a, b: 1 + Math.floor(Math.random() * 12), isPractice: false };
+      return { a, b: 1 + Math.floor(Math.random() * 12), isPractice: false, mastered: false };
     };
     let r;
     try {
@@ -276,7 +276,7 @@ export class MathEngine {
 
   async nextOrder(level, settings) {
     const r = await this._next('order', level, settings);
-    return { a: r.a, b: r.b, target: r.a * r.b, isPractice: !!r.isPractice };
+    return { a: r.a, b: r.b, target: r.a * r.b, isPractice: !!r.isPractice, mastered: !!r.mastered };
   }
 
   async nextSurge(level, settings) {

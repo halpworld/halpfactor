@@ -14,6 +14,7 @@ test('engine (in-thread fallback in Node): order, record, snapshot, persist, res
   const o = await e.nextOrder(1, { autoCurriculum: true });
   assert.equal(o.target, o.a * o.b);
   assert.equal(typeof o.isPractice, 'boolean');
+  assert.equal(o.mastered, false); // nothing recorded yet
   const s = await e.nextSurge(3, { autoCurriculum: true });
   assert.ok(s.a >= 1 && s.b >= 1 && s.a <= 12 && s.b <= 12);
 
@@ -68,4 +69,25 @@ test('worker message protocol via createHandler', () => {
   assert.deepEqual(out.pop().data.facts, {});
   h(null); h('x'); h({ type: 'bogus' });
   assert.equal(out.length, 0);
+});
+
+test('worker next message carries mastered; engine nextOrder passes it through', async () => {
+  const out = [];
+  const h = createHandler((m) => out.push(m));
+  h({ type: 'init', data: null });
+  for (let i = 0; i < 5; i++) h({ type: 'record', a: 7, b: 1, correct: true, responseTimeMs: 1000, now: Date.now() });
+  h({ type: 'next', id: 1, kind: 'order', tables: [7], recentKeys: [] });
+  const n = out.find((m) => m.type === 'next');
+  assert.equal(typeof n.mastered, 'boolean');
+
+  const st = memStorage();
+  const e = await MathEngine.create({ storage: st });
+  for (let b = 1; b <= 10; b++) for (let i = 0; i < 5; i++) e.record(2, b, true, 1000);
+  let mastered = 0;
+  for (let i = 0; i < 40; i++) {
+    const o = await e.nextOrder(9, { autoCurriculum: false, enabledTables: [2] });
+    assert.equal(typeof o.mastered, 'boolean');
+    if (o.mastered) mastered++;
+  }
+  assert.ok(mastered > 0);
 });

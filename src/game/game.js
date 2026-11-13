@@ -15,7 +15,12 @@ import { Floaters } from './floaters.js';
 import { CyberCat, Drone } from './critters.js';
 import { Input } from './input.js';
 import { DOCK } from './layout.js';
-import { calibrationRecord, surgeRecord, surgeGate, cancelBreaksStreak, deliveryOutcome } from './rules.js';
+import {
+  surgeRecord, surgeGate, cancelBreaksStreak, deliveryOutcome,
+  orderKind, buildPairOk, buildMachineOk, factorMismatchRecord, FACTOR_CRITICAL_MS,
+  orderClockRuns, buildCalibrationRecord, buildRecallMs, hadWrongSubmission, logPeeksOrder,
+  promptClockRuns, orderClockAfterPrompt,
+} from './rules.js';
 import { DEFAULT_TABLES } from '../math/mastery.js';
 import { formatBolts } from '../core/format.js';
 import { drawPet } from '../render/pets.js';
@@ -40,7 +45,8 @@ const BUILD_DROP_S = 0.7; // drop-in + pop duration
 const PET_Y = 958; // equipped pets hover over the floor strip
 const DRAG_THRESHOLD = 14; // world px before a press counts as a drag
 const TUTORIAL_TOTAL = 5;
-const TUTORIAL_ORDER = Object.freeze({ a: 2, b: 5, target: 10, isPractice: false });
+const TUTORIAL_ORDER = Object.freeze({ a: 2, b: 5, target: 10, isPractice: false, mastered: false, kind: 'build' });
+const FACTOR_WIRE_S = 0.4; // factor orders: let the belt lay in before the result
 
 // Shop failure reasons from economy.js -> the UI's REASONS keys (or kid-friendly text).
 const REASON_TEXT = {
@@ -65,7 +71,7 @@ function fallbackFact(level, settings) {
     ? settings.enabledTables : DEFAULT_TABLES;
   const a = tables[(Math.random() * tables.length) | 0];
   const b = 1 + ((Math.random() * 12) | 0);
-  return Math.random() < 0.5 ? { a, b, isPractice: false } : { a: b, b: a, isPractice: false };
+  return Math.random() < 0.5 ? { a, b, isPractice: false, mastered: false } : { a: b, b: a, isPractice: false, mastered: false };
 }
 
 function validFact(f) {
@@ -142,6 +148,11 @@ export class Game {
     this.activeDisp = null;
     this.mismatches = 0;
     this.calib = null; // { firstTryCorrect, responseTimeMs, auto }
+    this.orderMs = 0; // per-order clock: time spent at 'await' (no overlay open), all wires so far
+    this.peeked = false; // the parent log was opened while this order was unanswered
+    this.promptMs = 0; // build orders: time the current Calibration Lock has been open (pause-aware)
+    this.promptTiming = false; // a non-drone build-order calibration prompt is up
+    this.cueT = 0; // build orders: wrong-pair cue cooldown (s)
     this.overclock = 0;
     this.surgeIn = 2 + ((Math.random() * 2) | 0);
     this.surgeThisOrder = false;
@@ -371,6 +382,11 @@ export class Game {
 
   update(dt) {
     this.time += dt;
+    // Per-order clock (recall time / CRITICAL): only while the order is ready and nothing covers
+    // the factory. update() itself is frozen while the tab is hidden or in portrait.
+    if (orderClockRuns({ phase: this.phase, hasOrder: !!this.order, blocking: this.phase === 'await' && this._uiBlocking() })) this.orderMs += dt * 1000;
+    if (promptClockRuns({ phase: this.phase, timing: this.promptTiming, covered: this._uiCovered() })) this.promptMs += dt * 1000;
+    if (this.cueT > 0) this.cueT -= dt;
     // timers
     for (let i = this.timers.length - 1; i >= 0; i--) {
       const t = this.timers[i];
@@ -498,7 +514,11 @@ export class Game {
     this.surgeDone = false;
     this.surgeVariant = null;
     this.calib = null;
-    for (let i = 1; i <= 12; i++) this.dispensers[i].hint = 0;
+    this.orderMs = 0;
+    this.peeked = false;
+    this.promptMs = 0;
+    this.promptTiming = false;
+    this._clearHints();
     let order;
     if (this.tutorial) {
       order = { ...TUTORIAL_ORDER };
@@ -509,7 +529,15 @@ export class Game {
         console.error('[game] nextOrder failed; using fallback', err);
       }
       if (!validFact(order)) order = fallbackFact(this.save.level, this.save.settings);
-      order = { a: order.a, b: order.b, target: order.a * order.b, isPractice: !!order.isPractice };
+      const mastered = order.mastered === true;
+      order = {
+        a: order.a,
+        b: order.b,
+        target: order.a * order.b,
+        isPractice: !!order.isPractice,
+        mastered,
+        kind: orderKind({ mastered, tutorial: this.tutorial, isPractice: !!order.isPractice, target: order.a * order.b }),
+      };
     }
     if (token !== this.orderSeq) return;
     this.order = order;
@@ -527,6 +555,9 @@ export class Game {
     this.boss = new Boss({
       seed,
       target: order.target,
+      kind: order.kind,
+      a: order.a,
+      b: order.b,
       partIndex: this.partIndex,
       practice: order.isPractice,
       bonus: PRACTICE_TAG,
@@ -545,8 +576,60 @@ export class Game {
     this.particles.steam(boss.x - 100, DOCK.bossBaseY - 10, 5, 0.6);
     this.particles.steam(boss.x + 100, DOCK.bossBaseY - 10, 5, 0.6);
     this.phase = 'await';
+    this.orderMs = 0;
     if (this.tutorial) this._tutorialStep(1);
-    else if (this.dailyPending) this._maybeDaily();
+    else {
+      this._buildHints();
+      if (this.dailyPending) this._maybeDaily();
+    }
+  }
+
+  /** Build orders: pulse dispenser a and forge ×b as the obvious targets. */
+  _buildHints() {
+    const o = this.order;
+    if (!o || o.kind !== 'build' || this.tutorial) return;
+    this.dispensers[o.a].hint = 1e9;
+    this.forges[o.b].hint = 1e9;
+  }
+
+  _clearHints() {
+    for (let i = 1; i <= 12; i++) {
+      this.dispensers[i].hint = 0;
+      this.forges[i].hint = 0;
+    }
+  }
+
+  /**
+   * Build orders: a crate/forge (or pair) that is not the asked fact. Gentle cue only —
+   * no penalty, no streak break, nothing recorded.
+   */
+  _buildCue() {
+    const o = this.order;
+    if (!o) return;
+    this._clearSelection();
+    this.dispensers[o.a].bump(0.3);
+    this.forges[o.b].cycle(0.8);
+    if (this.boss) this.boss.wiggle = 0.3;
+    if (this.cueT > 0) return;
+    this.cueT = 1.6;
+    try {
+      this.ui.showToast(`The boss wants ${o.a} × ${o.b}!`, { kind: 'info', ms: 2200 });
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  /** Drag hover: build orders only light up the machine that completes the asked pair. */
+  _buildPairAllowed(disp, forge) {
+    const o = this.order;
+    if (!o || o.kind !== 'build' || this.tutorial || !disp || !forge) return true;
+    return buildPairOk(o, disp.value, forge.mult);
+  }
+
+  /** Should a tap/drag on this machine be refused (build order, not part of the asked pair)? */
+  _buildRefuses(value) {
+    const o = this.order;
+    return !!(o && o.kind === 'build' && !this.tutorial && !buildMachineOk(o, value));
   }
 
   _validDispensersFor(target) {
@@ -557,11 +640,16 @@ export class Game {
 
   async _wire(disp, forge) {
     if (this.phase !== 'await' || !this.order) return;
+    const A = disp.value;
+    const B = forge.mult;
+    const kind = this.order.kind;
+    if (kind === 'build' && !buildPairOk(this.order, A, B)) {
+      this._buildCue();
+      return;
+    }
     const token = this.orderSeq;
     this.phase = 'calibrating';
     this._clearSelection();
-    const A = disp.value;
-    const B = forge.mult;
     this.activeDisp = disp;
     this.activeForge = forge;
     this.beltIn = new Belt(disp.port, ...this._ctrlIn(disp.port, forge.inPort), forge.inPort);
@@ -570,6 +658,11 @@ export class Game {
     forge.cycle(0.5);
     this.particles.sparks(forge.inPort.x, forge.inPort.y, 10, PAL.cyan, 260);
     this.synth.hiss();
+
+    if (kind === 'factor') {
+      this._wireFactor(disp, forge, A, B, token);
+      return;
+    }
 
     const de = this.save.dronesEquipped || {};
     const droneTable = this.save.drones && (this.save.drones[A] && de[A] ? A : this.save.drones[B] && de[B] ? B : 0);
@@ -583,20 +676,28 @@ export class Game {
         if (token !== this.orderSeq) return;
       }
       const getAnchor = () => this.renderer.worldToScreen(forge.cx, forge.cy - 60);
+      this.promptMs = 0;
+      this.promptTiming = !drone;
       const prom = this.ui.promptCalibration({ a: A, b: B, anchor: getAnchor(), getAnchor, autoSolve: !!drone });
       if (this.tutorial && this.tutStep === 3) this._tutorialStep(4);
       const res = (await prom) || { cancelled: true };
+      this.promptTiming = false;
       if (token !== this.orderSeq) return;
       if (drone) {
         drone.goHome();
         this.particles.sparks(forge.cx, wp.y - 120, 10, PAL.green, 220);
       }
-      const rec = calibrationRecord(res, { auto: !!drone });
+      // Build orders: recall time includes the ready-to-wire time (the bubble showed a × b all
+      // along); nothing is recorded after an earlier wrong submission on this order (the
+      // blueprint showed the product) or once the parent log was peeked at.
+      // The tutorial counts keypad time only (reading the onboarding text is not recall time).
+      const awaitMs = this.tutorial ? 0 : this.orderMs;
+      const rec = buildCalibrationRecord(res, { auto: !!drone, wrongBefore: !!this.wrongThisOrder, peeked: this.peeked, awaitMs });
       if (rec.record) this._record(A, B, rec.correct, rec.ms);
-      if (cancelBreaksStreak(res)) {
-        this.save.streak = 0;
-        this.wrongThisOrder = true;
-      }
+      if (cancelBreaksStreak(res)) this.save.streak = 0;
+      if (hadWrongSubmission(res) && !drone) this.wrongThisOrder = true;
+      // A cancelled prompt's thinking time stays on the order clock (blank-cancel bypass).
+      if (!drone) this.orderMs = orderClockAfterPrompt(this.orderMs, this.promptMs, res);
       if (res.cancelled) {
         this.beltIn.retract();
         this.oldBelts.push(this.beltIn);
@@ -608,7 +709,8 @@ export class Game {
         if (this.tutorial) this._tutorialStep(2);
         return;
       }
-      this.calib = { firstTryCorrect: !!res.firstTryCorrect, responseTimeMs: res.responseTimeMs || 0, auto: !!drone };
+      const recallMs = buildRecallMs(res.responseTimeMs, awaitMs) || res.responseTimeMs || 0;
+      this.calib = { firstTryCorrect: !!res.firstTryCorrect, responseTimeMs: recallMs, auto: !!drone };
       if (A * B === this.order.target) this._startDelivery(disp, forge);
       else this._mismatch(disp, forge, A, B);
     } catch (err) {
@@ -617,7 +719,29 @@ export class Game {
     }
   }
 
+  /** Factor orders: the wired pair IS the answer (no keypad, no drone). */
+  async _wireFactor(disp, forge, A, B, token) {
+    try {
+      const firstTry = this.mismatches === 0;
+      const ms = this.orderMs;
+      await this.wait(FACTOR_WIRE_S);
+      if (token !== this.orderSeq) return;
+      if (A * B === this.order.target) {
+        this.calib = { firstTryCorrect: firstTry, responseTimeMs: ms, auto: false };
+        this._startDelivery(disp, forge);
+      } else {
+        const rec = factorMismatchRecord(this.order, this.mismatches);
+        if (rec.record) this._record(rec.a, rec.b, rec.correct, rec.ms);
+        this._mismatch(disp, forge, A, B);
+      }
+    } catch (err) {
+      console.error('[game] factor wiring failed', err);
+      if (token === this.orderSeq) this._abortWire();
+    }
+  }
+
   _abortWire() {
+    this.promptTiming = false;
     if (this.beltIn) {
       this.beltIn.retract();
       this.oldBelts.push(this.beltIn);
@@ -672,7 +796,7 @@ export class Game {
 
   _startDelivery(disp, forge) {
     this.phase = 'delivering';
-    for (let i = 1; i <= 12; i++) this.dispensers[i].hint = 0;
+    this._clearHints();
     forge.status = this.overclock > 0 ? FORGE_STATUS.CYAN : FORGE_STATUS.GREEN;
     forge.running = true;
     forge.cycle(1.6);
@@ -917,7 +1041,8 @@ export class Game {
       wrongThisOrder: !!this.wrongThisOrder,
       tutorial: !!this.tutorial,
       calib: this.calib,
-      criticalMs: CRITICAL_MS,
+      criticalMs: order.kind === 'factor' ? FACTOR_CRITICAL_MS : CRITICAL_MS,
+      peeked: !!this.peeked,
     });
     const critical = out.critical;
     this.save.streak = out.streak;
@@ -1139,10 +1264,10 @@ export class Game {
   _tutorialStep(step) {
     this.tutStep = step;
     const views = {
-      1: { text: 'This boss needs 10 parts!', target: () => (this.boss ? this._union(this.boss.rect, this.boss.bubbleRect) : null) },
+      1: { text: 'This boss wants 2 × 5 parts!', target: () => (this.boss ? this._union(this.boss.rect, this.boss.bubbleRect) : null) },
       2: { text: 'Tap the 2 crate', target: () => this.dispensers[2].hit },
       3: { text: 'Now tap the ×5 forge', target: () => this.forges[5].hit },
-      4: { text: '2 × 5 = ? Punch it in!', target: () => this.forges[5].hit },
+      4: { text: 'What is 2 × 5? Punch it in!', target: () => this.forges[5].hit },
       5: { text: 'Great! Watch it go!', target: () => (this.boss ? this.boss.rect : null) },
     };
     this.tutView = { step, ...views[step] };
@@ -1243,6 +1368,15 @@ export class Game {
     }
   }
 
+  /** A drawer/shop/log/daily/hatch overlay is open (a prompt alone does not count). */
+  _uiCovered() {
+    try {
+      return typeof this.ui.isCovered === 'function' ? !!this.ui.isCovered() : false;
+    } catch (e) {
+      return false;
+    }
+  }
+
   _uiBlocking() {
     try {
       return !!this.ui.isBlocking();
@@ -1287,6 +1421,7 @@ export class Game {
       const d = this._dispAt(x, y);
       if (d) {
         if (!this._tutorialAllows('disp', d.value)) return this._nudge();
+        if (this._buildRefuses(d.value)) return this._buildCue();
         if (this.selForge) {
           const f = this.selForge;
           this._wire(d, f);
@@ -1305,6 +1440,7 @@ export class Game {
       const f = this._forgeAt(x, y);
       if (f) {
         if (!this._tutorialAllows('forge', f.mult)) return this._nudge();
+        if (this._buildRefuses(f.mult)) return this._buildCue();
         if (this.selDisp) {
           this._wire(this.selDisp, f);
           return;
@@ -1360,14 +1496,15 @@ export class Game {
     if (!d.moved) return;
     if (d.from === 'disp') {
       const f = this._forgeAt(x, y);
-      const ok = f && this._tutorialAllows('forge', f.mult) ? f : null;
+      const ok = f && this._tutorialAllows('forge', f.mult) && this._buildPairAllowed(this.selDisp, f) ? f : null;
       if (ok !== this.hoverForge) {
         if (this.hoverForge) this.hoverForge.hover = false;
         this.hoverForge = ok;
         if (ok) ok.hover = true;
       }
     } else if (d.from === 'forge') {
-      const ds = this._dispAt(x, y);
+      let ds = this._dispAt(x, y);
+      if (ds && !this._buildPairAllowed(ds, this.selForge)) ds = null;
       if (ds !== this.hoverDisp) {
         if (this.hoverDisp) this.hoverDisp.hover = false;
         this.hoverDisp = ds;
@@ -1843,7 +1980,7 @@ export class Game {
     // (its clock would keep running under the drawer).
     if (this._promptOpen()) return;
     try {
-      this.ui.openForemanLog(
+      const opened = this.ui.openForemanLog(
         { facts: snap.facts || {}, tableMastery: snap.tableMastery || [], settings: { ...this.save.settings, enabledTables: [...(this.save.settings.enabledTables || [])] }, autoTables: this._autoTables() },
         {
           onSettingsChange: (settings) => this._onSettingsChange(settings),
@@ -1856,6 +1993,9 @@ export class Game {
           },
         },
       );
+      // The log lists every product: peeking at it on an unanswered order voids that order's
+      // mastery record and CRITICAL (a factor order's first-mismatch penalty still applies).
+      if (opened !== false && this.order && logPeeksOrder(this.phase)) this.peeked = true;
     } catch (e) {
       console.error('[game] openForemanLog failed', e);
     }

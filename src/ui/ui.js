@@ -63,5 +63,7 @@ export class UI {
   closeShop() { this.shop.close(); }
   openForemanLog(data, handlers) { if (this.prompt) return false; this.log.open(data || {}, handlers || {}); return true; }
   isPromptOpen() { return !!this.prompt; }
+  // Drawer/shop/log/daily/hatch open (not counting a prompt).
+  isCovered() { return !!(this.shop.isOpen || this.log.isOpen || this.daily.isOpen || this.shop.hatch.isOpen); }
   isBlocking() { return !!this.prompt || this.shop.isOpen || this.log.isOpen || this.daily.isOpen || this.shop.hatch.isOpen; }
 }
